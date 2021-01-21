@@ -65,10 +65,12 @@ inline __attribute__((always_inline)) double one_jacobi_iteration(double xStart,
 
     for (y = 1; y < (maxYCount-1); y++)
     {
-        fYSquare = (yStart + (y-1)*deltaY) * (yStart + (y-1)*deltaY);
+		fY = yStart + (y-1)*deltaY;
+        fYSquare = fY*fY;
         for (x = 1; x < (maxXCount-1); x++)
         {
-			fXSquare = (xStart + (x-1)*deltaX) * (xStart + (x-1)*deltaX);
+			fX = xStart + (x-1)*deltaX;
+			fXSquare = fX*fX;
             f = -alpha*(1.0-fXSquare)*(1.0-fYSquare) - 2.0*(1.0-fXSquare) - 2.0*(1.0-fYSquare);
 			double curVal = SRC(x,y);
             updateVal = (	(SRC(x-1,y) + SRC(x+1,y))*cx +
