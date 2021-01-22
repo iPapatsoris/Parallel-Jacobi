@@ -159,6 +159,8 @@ int main(int argc, char **argv)
 
     double deltaX = (xRight-xLeft)/(n-1);
     double deltaY = (yUp-yBottom)/(m-1);
+	int maxXcount = n+1;
+	int maxYcount = m+2;
 
     iterationCount = 0;
     error = HUGE_VAL;
@@ -166,13 +168,13 @@ int main(int argc, char **argv)
     
     MPI_Init(NULL,NULL);
     t1 = MPI_Wtime();
-
+	
     /* Iterate as long as it takes to meet the convergence criterion */
     while (iterationCount < maxIterationCount && error > maxAcceptableError)
     {    	
 //        printf("Iteration %i", iterationCount);
         error = one_jacobi_iteration(xLeft, yBottom,
-                                     n+2, m+2,
+                                     maxXcount, maxYcount,
                                      u_old, u,
                                      deltaX, deltaY,
                                      alpha, relax);
@@ -183,8 +185,6 @@ int main(int argc, char **argv)
         u_old = u;
         u = tmp;
     }
-	int maxXcount = n+1;
-	int maxYcount = m+2;
 
     t2 = MPI_Wtime();
     printf( "Iterations=%3d Elapsed MPI Wall time is %f\n", iterationCount, t2 - t1 ); 
