@@ -1,5 +1,5 @@
-OBJS =  util.o jacobiMPI.o
-HEADER = util.h
+OBJS =  util.o array_operations.o jacobiMPI.o
+HEADER = util.h array_operations.h
 
 CC 	= mpicc
 MPIP = -L/opt/mpiP-3.5/lib -lmpiP -lbfd -lunwind
@@ -10,6 +10,9 @@ all: $(OBJS) $(HEADER)
 
 util.o: util.c
 	$(CC) $(FLAGS) util.c 
+
+array_operations.o: array_operations.c
+	$(CC) $(FLAGS) array_operations.c 
 
 jacobiMPI.o: jacobiMPI.c
 	$(CC) $(FLAGS) jacobiMPI.c
