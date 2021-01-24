@@ -9,6 +9,11 @@
 #include <string.h>
 
 #define OUTPUTFILE "output"
+#define XLEFT -1.0
+#define XRIGHT 1.0
+#define YBOTTOM -1.0
+#define YTOP 1.0
+
 
 int main(int argc, char **argv)
 {   
@@ -48,6 +53,7 @@ int main(int argc, char **argv)
 	const int inputColumns = jacobiParams.inputColumns;
 	int maxIterations = jacobiParams.maxIterations;
 	const bool checkConvergence = jacobiParams.checkConvergence;
+	printf("check is %d\n", checkConvergence);
 
     // Block partitioning
     const int dimensionProcesses = (const int) sqrt(totalProcesses);
@@ -56,6 +62,16 @@ int main(int argc, char **argv)
     const int columnsOfProcesses = (perfectSquare ? dimensionProcesses : totalProcesses / linesOfProcesses);
     const int rows = inputRows / linesOfProcesses + 2;
     const int columns = inputColumns / columnsOfProcesses + 2;
+
+	// Jacobi constants
+	const double deltaX = XRIGHT - XLEFT / (jacobiParams.inputColumns - 1);
+    const double deltaY = YTOP - YBOTTOM / (jacobiParams.inputRows - 1);
+    const double cx = 1.0/(deltaX*deltaX);
+    const double cy = 1.0/(deltaY*deltaY);
+    const double cc = -2.0*cx-2.0*cy-jacobiParams.alpha;
+	
+	double error = HUGE_VAL;
+	double finalError = 0;
 
 	//if (!processID) {
 		printf("(%d) %d X %d\nProcesses: %d X %d\nRows: %d\nColumns %d\n\n", processID, inputRows, inputColumns, linesOfProcesses, columnsOfProcesses, rows, columns);
@@ -129,7 +145,7 @@ int main(int argc, char **argv)
 	MPI_Pcontrol(1);
     local_start = MPI_Wtime();
 
-    while (maxIterations--) {
+    while (maxIterations-- || (false && checkConvergence && error > jacobiParams.tol)) {
         // Start sending and receiving halo points (non-blocking)
         MPI_Start(&recvRequests[SOUTH]);
         MPI_Start(&recvRequests[NORTH]);
@@ -141,7 +157,11 @@ int main(int argc, char **argv)
         MPI_Start(&sendRequests[WEST]);
         MPI_Start(&sendRequests[EAST]);
 
-		/* Filter outer pixels as halo points arrive */
+		error = 0.0;
+		calculateInnerElements(array, newArray, rows, columns, &jacobiParams,
+								YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);
+
+		// Calculate outer elements as halo points arrive
         while (remainingOperations) {
             if (!completedOperations[NORTH]) {
                 MPI_Test(&recvRequests[NORTH], &completedOperations[NORTH], &status);
@@ -149,7 +169,8 @@ int main(int argc, char **argv)
                     remainingOperations--;
 
                     for (int j = 2 ; j < columns - 2 ; j++) {
-                        // applyFilter(newArray, array, rows, columns, 1, j, filter, pixelBytes);
+						calculateOneElement(1, j, array, newArray, rows, columns, &jacobiParams,
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);
                     }
                 }
             }
@@ -159,8 +180,9 @@ int main(int argc, char **argv)
                     remainingOperations--;
 
                     for (int j = 2 ; j < columns - 2 ; j++) {
-                        // applyFilter(newArray, array, rows, columns, rows-2, j, filter, pixelBytes);
-                    }
+						calculateOneElement(rows - 2, j, array, newArray, rows, columns, &jacobiParams,
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);                   
+					}
                 }
             }
             if (!completedOperations[EAST]) {
@@ -169,8 +191,9 @@ int main(int argc, char **argv)
                     remainingOperations--;
 
                     for (int i = 2 ; i < rows - 2 ; i++) {
-                        // applyFilter(newArray, array, rows, columns, i, columns-2, filter, pixelBytes);
-                    }
+						calculateOneElement(i, columns - 2, array, newArray, rows, columns, &jacobiParams,
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);                   
+					}
                 }
             }
             if (!completedOperations[WEST]) {
@@ -179,9 +202,9 @@ int main(int argc, char **argv)
                     remainingOperations--;
 
                     for (int i = 2 ; i < rows - 2 ; i++) {
-						// array[at(i,j, columns)] += 1;
-                        // applyFilter(newArray, array, rows, columns, i, 1, filter, pixelBytes);
-                    }
+						calculateOneElement(i, 1, array, newArray, rows, columns, &jacobiParams,
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);                   
+					}
                 }
             }
 
@@ -189,42 +212,42 @@ int main(int argc, char **argv)
                 if (completedOperations[NORTH] && completedOperations[EAST]) {
                     remainingOperations--;
                     completedOperations[NORTHEAST] = 1;
-                    // applyFilter(newArray, array, rows, columns, 1, columns-2, filter, pixelBytes);
-                }
+					calculateOneElement(1, columns-2, array, newArray, rows, columns, &jacobiParams,
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);                
+					}
             }
             if (!completedOperations[NORTHWEST]) {
                 if (completedOperations[NORTH] && completedOperations[WEST]) {
                     remainingOperations--;
                     completedOperations[NORTHWEST] = 1;
-                    // applyFilter(newArray, array, rows, columns, 1, 1, filter, pixelBytes);
-                }
+					calculateOneElement(1, 1, array, newArray, rows, columns, &jacobiParams,
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);               
+					}
             }
             if (!completedOperations[SOUTHEAST]) {
                 if (completedOperations[SOUTH] && completedOperations[EAST]) {
                     remainingOperations--;
                     completedOperations[SOUTHEAST] = 1;
-                    // applyFilter(newArray, array, rows, columns, rows-2, columns-2, filter, pixelBytes);
-                }
+					calculateOneElement(rows - 2, columns - 2, array, newArray, rows, columns, &jacobiParams,
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);                
+					}
             }
             if (!completedOperations[SOUTHWEST]) {
                 if (completedOperations[SOUTH] && completedOperations[WEST]) {
                     remainingOperations--;
                     completedOperations[SOUTHWEST] = 1;					
-                    // applyFilter(newArray, array, rows, columns, rows-2, 1, filter, pixelBytes);
-                }
+					calculateOneElement(rows - 2, 1, array, newArray, rows, columns, &jacobiParams,
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);                
+					}
             }
-
         }
 
         resetCompletedOperations(completedOperations, &remainingOperations);
 
-        /* Check if image has changed
-        if (checkConvergence) { printf("Hi\n");
-            checkChangeAtIterations = interval;
-            char same = sameImage(array, newArray, rows, columns, pixelBytes);
-            char sameForAll = 0;
-            MPI_Reduce(&same, &sameForAll, 1, MPI_CHAR, MPI_LAND, 0, cartesianComm);
-        }*/
+        if (checkConvergence) {
+            MPI_Reduce(&error, &finalError, 1, MPI_DOUBLE, MPI_SUM, 0, cartesianComm);
+        }
+
         MPI_Waitall(4, sendRequests, statuses);
         reverseDirection(&array, &newArray, &sendRequests, &recvRequests, sendStraightRequests, sendReverseRequests, recvStraightRequests, recvReverseRequests);
 	}
@@ -236,13 +259,15 @@ int main(int argc, char **argv)
     MPI_Reduce(&local_elapsed, &elapsed, 1, MPI_DOUBLE, MPI_MAX, 0, cartesianComm);
     if (!processID) {
         printf("Elapsed time: %.2lf\n", elapsed);
-    }
+		if (jacobiParams.checkConvergence) {
+			printf("Error is %g\n",error);
+		}
+	}
 
     // MPI_File_close(&outputHandle);
     MPI_Type_free(&rowElementsDatatype);
     MPI_Type_free(&columnElementsDatatype);
     MPI_Finalize();
-
     free(array);
     free(newArray);
 	return 0;
