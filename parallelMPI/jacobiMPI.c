@@ -53,7 +53,6 @@ int main(int argc, char **argv)
 	const int inputColumns = jacobiParams.inputColumns;
 	int maxIterations = jacobiParams.maxIterations;
 	const bool checkConvergence = jacobiParams.checkConvergence;
-	printf("check is %d\n", checkConvergence);
 
     // Block partitioning
     const int dimensionProcesses = (const int) sqrt(totalProcesses);
@@ -64,18 +63,18 @@ int main(int argc, char **argv)
     const int columns = inputColumns / columnsOfProcesses + 2;
 
 	// Jacobi constants
-	const double deltaX = XRIGHT - XLEFT / (jacobiParams.inputColumns - 1);
-    const double deltaY = YTOP - YBOTTOM / (jacobiParams.inputRows - 1);
+	const double deltaX = (XRIGHT - XLEFT) / (jacobiParams.inputColumns - 1);
+    const double deltaY = (YTOP - YBOTTOM) / (jacobiParams.inputRows - 1);
     const double cx = 1.0/(deltaX*deltaX);
     const double cy = 1.0/(deltaY*deltaY);
     const double cc = -2.0*cx-2.0*cy-jacobiParams.alpha;
 	
-	double error = HUGE_VAL;
-	double finalError = 0;
+	double error = 0.0;
+	double finalError = HUGE_VAL;
 
-	//if (!processID) {
+	if (!processID) {
 		printf("(%d) %d X %d\nProcesses: %d X %d\nRows: %d\nColumns %d\n\n", processID, inputRows, inputColumns, linesOfProcesses, columnsOfProcesses, rows, columns);
-	//}
+	}
 
 	// 2d arrays as 1d for contiguous space
     double *array;
@@ -98,7 +97,6 @@ int main(int argc, char **argv)
 
     // Process' neighbours
     struct Neighbours n = constructNeighbours(processID, columnsOfProcesses, totalProcesses);
-	printNeighbours(n, processID);
 	
 	// Create rowElements MPI datatype
     MPI_Datatype rowElementsDatatype;
@@ -145,7 +143,7 @@ int main(int argc, char **argv)
 	MPI_Pcontrol(1);
     local_start = MPI_Wtime();
 
-    while (maxIterations-- || (false && checkConvergence && error > jacobiParams.tol)) {
+    while (maxIterations-- || (false && checkConvergence && finalError > jacobiParams.tol)) {
         // Start sending and receiving halo points (non-blocking)
         MPI_Start(&recvRequests[SOUTH]);
         MPI_Start(&recvRequests[NORTH]);
@@ -245,8 +243,11 @@ int main(int argc, char **argv)
         resetCompletedOperations(completedOperations, &remainingOperations);
 
         if (checkConvergence) {
-            MPI_Reduce(&error, &finalError, 1, MPI_DOUBLE, MPI_SUM, 0, cartesianComm);
+			printf("Process %d error %f\n", processID, error);
+            MPI_Allreduce(&error, &finalError, 1, MPI_DOUBLE, MPI_SUM, cartesianComm);
+			finalError = sqrt(finalError)/(((inputColumns))*((inputRows)));
         }
+		// 840 1 and 4 process, correct is inputColumns
 
         MPI_Waitall(4, sendRequests, statuses);
         reverseDirection(&array, &newArray, &sendRequests, &recvRequests, sendStraightRequests, sendReverseRequests, recvStraightRequests, recvReverseRequests);
@@ -260,8 +261,19 @@ int main(int argc, char **argv)
     if (!processID) {
         printf("Elapsed time: %.2lf\n", elapsed);
 		if (jacobiParams.checkConvergence) {
-			printf("Error is %g\n",error);
+			printf("Error is %g\n",finalError);
 		}
+	}
+
+	if (processID == 0) {
+		printf("Process %d\n", processID);
+		for (int i = 0 ; i < rows ; i++) {
+		printf("\nLine %d\n", i);
+		for (int j = 0 ; j < columns ; j++) {
+			printf("%f ", array[at(i, j, columns)]);
+		}
+		printf("\n");
+	}
 	}
 
     // MPI_File_close(&outputHandle);
