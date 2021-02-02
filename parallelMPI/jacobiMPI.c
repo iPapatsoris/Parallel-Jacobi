@@ -63,11 +63,13 @@ int main(int argc, char **argv)
     const int columns = inputColumns / columnsOfProcesses + 2;
 
 	// Jacobi constants
-	const double deltaX = (XRIGHT - XLEFT) / (jacobiParams.inputColumns - 1);
-    const double deltaY = (YTOP - YBOTTOM) / (jacobiParams.inputRows - 1);
+	const double deltaX = (XRIGHT - XLEFT) / (inputColumns - 1);
+    const double deltaY = (YTOP - YBOTTOM) / (inputRows - 1);
     const double cx = 1.0/(deltaX*deltaX);
     const double cy = 1.0/(deltaY*deltaY);
     const double cc = -2.0*cx-2.0*cy-jacobiParams.alpha;
+	const int yIncrement = (processID / columnsOfProcesses) * (rows - 2);
+	const int xIncrement = (processID % columnsOfProcesses) * (columns - 2);
 	
 	double error = 0.0;
 	double finalError = HUGE_VAL;
@@ -108,6 +110,31 @@ int main(int argc, char **argv)
     MPI_Type_vector(rows - 2, 1, columns, MPI_DOUBLE, &columnElementsDatatype);
     MPI_Type_commit(&columnElementsDatatype);
 
+	/* Parallel I/O */
+    MPI_File outputHandle;
+    int gSizes[2], lSizes[2], memSizes[2], startIndices[2];
+    gSizes[0] = inputRows;
+    gSizes[1] = inputColumns;
+    lSizes[0] = rows - 2;
+    lSizes[1] = columns - 2;
+    memSizes[0] = rows;
+    memSizes[1] = columns;
+    startIndices[0] = startIndices[1] = 1;
+
+    MPI_Datatype memtype;
+    MPI_Type_create_subarray(2, memSizes, lSizes, startIndices, MPI_ORDER_C, MPI_DOUBLE, &memtype);
+    MPI_Type_commit(&memtype);
+
+    MPI_Datatype filetype;
+    startIndices[0] = (processID / columnsOfProcesses) * lSizes[0];
+    startIndices[1] = (processID % columnsOfProcesses) * lSizes[1];
+
+	MPI_Type_create_subarray(2, gSizes, lSizes, startIndices, MPI_ORDER_C, MPI_DOUBLE, &filetype);
+    MPI_Type_commit(&filetype);
+
+    MPI_File_open(cartesianComm, OUTPUTFILE, MPI_MODE_CREATE|MPI_MODE_WRONLY, MPI_INFO_NULL, &outputHandle);
+    MPI_File_set_view(outputHandle, 0, MPI_DOUBLE, filetype, "native", MPI_INFO_NULL);
+
 
 	// Setup persistent communication requests 
     MPI_Request sendStraightRequests[4];
@@ -143,7 +170,7 @@ int main(int argc, char **argv)
 	MPI_Pcontrol(1);
     local_start = MPI_Wtime();
 
-    while (maxIterations-- || (false && checkConvergence && finalError > jacobiParams.tol)) {
+    while (maxIterations-- && (!checkConvergence || finalError > jacobiParams.tol)) {
         // Start sending and receiving halo points (non-blocking)
         MPI_Start(&recvRequests[SOUTH]);
         MPI_Start(&recvRequests[NORTH]);
@@ -157,7 +184,7 @@ int main(int argc, char **argv)
 
 		error = 0.0;
 		calculateInnerElements(array, newArray, rows, columns, &jacobiParams,
-								YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);
+								YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error, yIncrement, xIncrement);
 
 		// Calculate outer elements as halo points arrive
         while (remainingOperations) {
@@ -168,7 +195,7 @@ int main(int argc, char **argv)
 
                     for (int j = 2 ; j < columns - 2 ; j++) {
 						calculateOneElement(1, j, array, newArray, rows, columns, &jacobiParams,
-											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error, yIncrement, xIncrement);
                     }
                 }
             }
@@ -179,7 +206,7 @@ int main(int argc, char **argv)
 
                     for (int j = 2 ; j < columns - 2 ; j++) {
 						calculateOneElement(rows - 2, j, array, newArray, rows, columns, &jacobiParams,
-											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);                   
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error, yIncrement, xIncrement);                   
 					}
                 }
             }
@@ -190,7 +217,7 @@ int main(int argc, char **argv)
 
                     for (int i = 2 ; i < rows - 2 ; i++) {
 						calculateOneElement(i, columns - 2, array, newArray, rows, columns, &jacobiParams,
-											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);                   
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error, yIncrement, xIncrement);                   
 					}
                 }
             }
@@ -201,7 +228,7 @@ int main(int argc, char **argv)
 
                     for (int i = 2 ; i < rows - 2 ; i++) {
 						calculateOneElement(i, 1, array, newArray, rows, columns, &jacobiParams,
-											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);                   
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error, yIncrement, xIncrement);                   
 					}
                 }
             }
@@ -211,7 +238,7 @@ int main(int argc, char **argv)
                     remainingOperations--;
                     completedOperations[NORTHEAST] = 1;
 					calculateOneElement(1, columns-2, array, newArray, rows, columns, &jacobiParams,
-											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);                
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error, yIncrement, xIncrement);                
 					}
             }
             if (!completedOperations[NORTHWEST]) {
@@ -219,7 +246,7 @@ int main(int argc, char **argv)
                     remainingOperations--;
                     completedOperations[NORTHWEST] = 1;
 					calculateOneElement(1, 1, array, newArray, rows, columns, &jacobiParams,
-											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);               
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error, yIncrement, xIncrement);               
 					}
             }
             if (!completedOperations[SOUTHEAST]) {
@@ -227,7 +254,7 @@ int main(int argc, char **argv)
                     remainingOperations--;
                     completedOperations[SOUTHEAST] = 1;
 					calculateOneElement(rows - 2, columns - 2, array, newArray, rows, columns, &jacobiParams,
-											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);                
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error, yIncrement, xIncrement);                
 					}
             }
             if (!completedOperations[SOUTHWEST]) {
@@ -235,7 +262,7 @@ int main(int argc, char **argv)
                     remainingOperations--;
                     completedOperations[SOUTHWEST] = 1;					
 					calculateOneElement(rows - 2, 1, array, newArray, rows, columns, &jacobiParams,
-											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error);                
+											YBOTTOM, XLEFT, deltaY, deltaX, cy, cx, cc, &error, yIncrement, xIncrement);                
 					}
             }
         }
@@ -243,11 +270,9 @@ int main(int argc, char **argv)
         resetCompletedOperations(completedOperations, &remainingOperations);
 
         if (checkConvergence) {
-			printf("Process %d error %f\n", processID, error);
             MPI_Allreduce(&error, &finalError, 1, MPI_DOUBLE, MPI_SUM, cartesianComm);
-			finalError = sqrt(finalError)/(((inputColumns))*((inputRows)));
+			finalError = sqrt(finalError)/(inputColumns * inputRows);
         }
-		// 840 1 and 4 process, correct is inputColumns
 
         MPI_Waitall(4, sendRequests, statuses);
         reverseDirection(&array, &newArray, &sendRequests, &recvRequests, sendStraightRequests, sendReverseRequests, recvStraightRequests, recvReverseRequests);
@@ -255,9 +280,9 @@ int main(int argc, char **argv)
 
 	local_finish = MPI_Wtime();
 	MPI_Pcontrol(0);
-    // MPI_File_write_all(outputHandle, array, 1, memtype, &status);
     local_elapsed = local_finish - local_start;
     MPI_Reduce(&local_elapsed, &elapsed, 1, MPI_DOUBLE, MPI_MAX, 0, cartesianComm);
+	MPI_File_write_all(outputHandle, array, 1, memtype, &status);
     if (!processID) {
         printf("Elapsed time: %.2lf\n", elapsed);
 		if (jacobiParams.checkConvergence) {
@@ -265,20 +290,12 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (processID == 0) {
-		printf("Process %d\n", processID);
-		for (int i = 0 ; i < rows ; i++) {
-		printf("\nLine %d\n", i);
-		for (int j = 0 ; j < columns ; j++) {
-			printf("%f ", array[at(i, j, columns)]);
-		}
-		printf("\n");
-	}
-	}
-
-    // MPI_File_close(&outputHandle);
+    MPI_File_close(&outputHandle);
     MPI_Type_free(&rowElementsDatatype);
     MPI_Type_free(&columnElementsDatatype);
+	MPI_Type_free(&jacobiParamsDatatype);
+	MPI_Type_free(&memtype);
+	MPI_Type_free(&filetype);
     MPI_Finalize();
     free(array);
     free(newArray);

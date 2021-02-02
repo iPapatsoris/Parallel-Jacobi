@@ -17,16 +17,16 @@ void printArray(const double *array, const int lines, const int columns);
 __attribute__((always_inline)) inline void calculateOneElement(const int y, const int x, const double *array, double *newArray, 
 						const int rows, const int columns, const struct JacobiParams *jacobiParams,
 						const double yStart, const double xStart, const double deltaY, const double deltaX, 
-						const double cy, const double cx, const double cc, double *error) {
+						const double cy, const double cx, const double cc, double *error,
+						const int yIncrement, const int xIncrement) {
 	
-	double fY = yStart + (y-1)*deltaY;
-	double fYSquare = fY*fY;
-	double fX = xStart + (x-1)*deltaX;
-	double fXSquare = fX*fX;
+	int globalY = y + yIncrement;
+	int globalX = x + xIncrement;
 
-	// These are the same
-	// printf("deltaX %f deltaY %f alpha %f omega %f cx %f cy %f cc %f\n",
-	// deltaX, deltaY,jacobiParams->alpha, jacobiParams->relax, cx, cy, cc);
+	double fY = yStart + (globalY-1)*deltaY;
+	double fYSquare = fY*fY;
+	double fX = xStart + (globalX-1)*deltaX;
+	double fXSquare = fX*fX;
 
 	double f = -jacobiParams->alpha*(1.0-fXSquare)*(1.0-fYSquare) - 2.0*(1.0-fXSquare) - 2.0*(1.0-fYSquare);
 	double curVal = array[at(y, x, columns)];
@@ -42,25 +42,12 @@ __attribute__((always_inline)) inline void calculateOneElement(const int y, cons
 __attribute__((always_inline)) inline void calculateInnerElements(const double *array, double *newArray, 
 						const int rows, const int columns, const struct JacobiParams *jacobiParams,
 						const double yStart, const double xStart, const double deltaY, const double deltaX, 
-						const double cy, const double cx, const double cc, double *error) {
+						const double cy, const double cx, const double cc, double *error, const int yIncrement, const int xIncrement) {
 	
 	double fY, fX, fYSquare, fXSquare, f, curVal, updateVal;
 	for (int y = 2 ; y < rows - 2 ; y++) {
-		fY = yStart + (y-1)*deltaY;
-		fYSquare = fY*fY;
 		for (int x = 2 ; x < columns - 2 ; x++) {
-			calculateOneElement(y, x, array, newArray, rows, columns, jacobiParams, yStart, xStart, deltaY, deltaX, cy, cx, cc, error);
-			/*fX = xStart + (x-1)*deltaX;
-			fXSquare = fX*fX;
-			double f = -jacobiParams->alpha*(1.0-fXSquare)*(1.0-fYSquare) - 2.0*(1.0-fXSquare) - 2.0*(1.0-fYSquare);
-			double curVal = array[at(y, x, columns)];
-			double updateVal = ((array[at(y, x-1, columns)] + array[at(y, x+1, columns)])*cx +
-							(array[at(y-1, x, columns)] + array[at(y+1, x, columns)])*cy +
-							curVal*cc - f
-						)/cc;
-			newArray[at(y, x, columns)] = curVal - jacobiParams->relax*updateVal;
-			
-			(*error) += updateVal*updateVal;*/
+			calculateOneElement(y, x, array, newArray, rows, columns, jacobiParams, yStart, xStart, deltaY, deltaX, cy, cx, cc, error, yIncrement, xIncrement);
 		}
 	}
 }

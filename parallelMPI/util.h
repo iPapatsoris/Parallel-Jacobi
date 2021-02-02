@@ -21,8 +21,6 @@ struct JacobiParams {
 struct Neighbours constructNeighbours(const int processID, const int columnsOfProcesses, const int totalProcesses);
 void printNeighbours(const struct Neighbours n, const int processID);
 void parseInput(struct JacobiParams *jacobiParams);
-// void performParallelIO(char *inputFile, const int totalLines, const int totalColumns, const int processLines, const int columnsOfProcesses, const int lines, const int columns,
-//                       MPI_Datatype *inputHandle, MPI_Datatype *outputHandle, MPI_Datatype *pixelDatatype, MPI_Datatype *memtype, MPI_Datatype *filetype);
 
 __attribute__((always_inline)) inline void reverseDirection(double **array, double **newArray, MPI_Request **sendRequests, MPI_Request **recvRequests, MPI_Request *sendStraightRequests, MPI_Request *sendReverseRequests, MPI_Request *recvStraightRequests, MPI_Request *recvReverseRequests) {
     double *tmp = *array;

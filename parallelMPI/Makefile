@@ -5,7 +5,12 @@ CC 	= mpicc
 MPIP = -L/opt/mpiP-3.5/lib -lmpiP -lbfd -lunwind
 FLAGS	= -g -O3 ${MPIP} -c 
 
-all: $(OBJS) $(HEADER)
+all: jacobi read_array
+
+read_array: read_array.c
+	gcc read_array.c -o read_array
+
+jacobi: $(OBJS) $(HEADER)
 	$(CC) -O3 -lm ${MPIP} -o jacobiMPI.x $(OBJS)
 
 util.o: util.c
