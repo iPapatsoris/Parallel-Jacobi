@@ -49,7 +49,7 @@ inline __attribute__((always_inline)) double one_jacobi_iteration(double xStart,
                             int maxXCount, int maxYCount,
                             double *src, double *dst,
                             double deltaX, double deltaY,
-                            double alpha, double omega)
+                            double alpha, double omega, double cx, double cy, double cc)
 {
 #define SRC(XX,YY) src[(YY)*maxXCount+(XX)]
 #define DST(XX,YY) dst[(YY)*maxXCount+(XX)]
@@ -58,10 +58,6 @@ inline __attribute__((always_inline)) double one_jacobi_iteration(double xStart,
     double error = 0.0;
     double updateVal;
     double f;
-    // Coefficients
-    double cx = 1.0/(deltaX*deltaX);
-    double cy = 1.0/(deltaY*deltaY);
-    double cc = -2.0*cx-2.0*cy-alpha;
 
     for (y = 1; y < (maxYCount-1); y++)
     {
@@ -159,7 +155,11 @@ int main(int argc, char **argv)
 
     double deltaX = (xRight-xLeft)/(n-1);
     double deltaY = (yUp-yBottom)/(m-1);
-	int maxXcount = n+1;
+	double cx = 1.0/(deltaX*deltaX);
+    double cy = 1.0/(deltaY*deltaY);
+    double cc = -2.0*cx-2.0*cy-alpha;
+
+	int maxXcount = n+2;
 	int maxYcount = m+2;
 
     iterationCount = 0;
@@ -177,7 +177,7 @@ int main(int argc, char **argv)
                                      maxXcount, maxYcount,
                                      u_old, u,
                                      deltaX, deltaY,
-                                     alpha, relax);
+                                     alpha, relax, cx, cy, cc);
 //        printf("\tError %g\n", error);
         iterationCount++;
         // Swap the buffers
