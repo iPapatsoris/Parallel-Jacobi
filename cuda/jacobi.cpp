@@ -28,15 +28,13 @@ int main(int argc, char **argv) {
 
     printf("Execution time %.2f msecs\n", msecs);
 
-	// I PRINT CORRECTLY BUT THEY ARE IN THE OPPOSITE ORDER!
-	for (int i = 0 ; i < inputRows ; i++) {
-		//if (i != 32) continue;
+	/*for (int i = 0 ; i < inputRows ; i++) {
 		printf("Line %d\n", i);
 		for (int j = 0 ; j < inputColumns ; j++) {
 			printf("%.25f j %d\n", array[i*inputColumns + j], j);
 		}
 		printf("\n");
-	}
+	}*/
 
 	free(array);
 }
