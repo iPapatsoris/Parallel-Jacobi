@@ -3,12 +3,9 @@
 #include <math.h>
 
 void divide2D(int total, int *rows, int *columns) {
-	int r = (int) sqrt(total);
-	const bool perfectSquare = (r * r == total);
-	*rows = r;
-	*columns = (perfectSquare ? r : total / r);
+	*columns = ceil(sqrt(total));
+	*rows = ceil((float) total / *columns);
 }
-
 
 void parseInput(struct JacobiParams *jacobiParams) {
 //    printf("Input n,m - grid dimension in x,y direction:\n");
@@ -29,6 +26,6 @@ void parseInput(struct JacobiParams *jacobiParams) {
 
 void initArray(double *array, int size) {
 	for (int i = 0 ; i < size ; i++) {
-		array[i] =  i;
+		array[i] =  0;
 	}	
 }

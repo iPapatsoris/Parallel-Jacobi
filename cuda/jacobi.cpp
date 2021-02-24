@@ -4,7 +4,7 @@
 #include <cuda_runtime_api.h>
 #include "util.h"
 
-extern "C" float jacobiGPU(double *, int, int, int);
+extern "C" float jacobiGPU(double *, int, int, int, const JacobiParams );
 
 int main(int argc, char **argv) {
 	struct JacobiParams jacobiParams;
@@ -24,10 +24,19 @@ int main(int argc, char **argv) {
 	}
 
 	initArray(array, elements);
-	float msecs = jacobiGPU(array, elements, inputRows, inputColumns);
-
+	float msecs = jacobiGPU(array, elements, inputRows, inputColumns, jacobiParams);
 
     printf("Execution time %.2f msecs\n", msecs);
+
+	// I PRINT CORRECTLY BUT THEY ARE IN THE OPPOSITE ORDER!
+	for (int i = 0 ; i < inputRows ; i++) {
+		//if (i != 32) continue;
+		printf("Line %d\n", i);
+		for (int j = 0 ; j < inputColumns ; j++) {
+			printf("%.25f j %d\n", array[i*inputColumns + j], j);
+		}
+		printf("\n");
+	}
 
 	free(array);
 }
