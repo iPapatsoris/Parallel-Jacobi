@@ -1,17 +1,16 @@
-#include <lcutil.h>
 #include <timestamp.h>
 #include <stdio.h>
 #include <math.h>
 #include "util.h"
 
 #define BLOCK_SIZE 256
+
 #define XRIGHT 1
 #define XLEFT -1
 #define YTOP 1
 #define YBOTTOM -1
 
 #define ROUND_UP(XX, YY) ((double) (XX + YY - 1) / YY);
-
 
 struct Neighbors {
 	int north;
@@ -21,10 +20,144 @@ struct Neighbors {
 	int center;
 };
 
+__global__ void kjacobi(double *array, double *newArray, int inputRows, int inputColumns, const JacobiParams jacobiParams, const int sharedMemorySize, double *errorArray);
+
+__global__ void ksum(double *array, double *newArray);
 __device__ Neighbors constructNeighbors(int i, int columns);
 __device__ __attribute__((always_inline)) inline void calculateOneElement(const int y, const int x, 
 	const struct Neighbors *neighbors, const double *sharedArray, double *array, 
 	const struct JacobiParams jacobiParams, double *errorArray, const int inputColumns, const int inputRows);
+
+extern "C" float jacobiGPU(double *array, int elements, int inputRows, int inputColumns, JacobiParams jacobiParams) {
+	double *arrayDevice;
+	double finalError;
+	cudaError_t err;
+	int arrayBytes = elements * sizeof(double);
+
+	int rowsOfBlocks, columnsOfBlocks, rowsOfBlockThreads, columnsOfBlockThreads;
+	divide2D(BLOCK_SIZE, &rowsOfBlockThreads, &columnsOfBlockThreads);
+	rowsOfBlocks = ceil((float) inputRows / rowsOfBlockThreads);
+	columnsOfBlocks = ceil((float) inputColumns / columnsOfBlockThreads);
+
+	int sharedMemorySize = (rowsOfBlockThreads + 2) * (columnsOfBlockThreads + 2);
+	
+	dim3 dimBl(columnsOfBlockThreads, rowsOfBlockThreads);
+	dim3 dimGr(columnsOfBlocks, rowsOfBlocks);
+
+	printf("Elements %d\nGrid %d X %d\nBlock threads %d X %d\n", elements, rowsOfBlocks, columnsOfBlocks, rowsOfBlockThreads, columnsOfBlockThreads);
+
+	err = cudaMalloc((void **)&arrayDevice, arrayBytes);
+	if (err != cudaSuccess){
+		fprintf(stderr, "GPUassert: %s\n",err);
+		return err;
+	}
+
+	err = cudaMemcpy(arrayDevice, array, arrayBytes, cudaMemcpyHostToDevice);
+	if (err != cudaSuccess){
+		fprintf(stderr, "GPUassert: %s\n",err);
+		return err;
+	}
+
+	// For writing result of an iteration
+	double *newArrayDevice;
+	err = cudaMalloc((void **)&newArrayDevice, arrayBytes);
+	if (err != cudaSuccess){
+		fprintf(stderr, "GPUassert: %s\n",err);
+		return err;
+	}
+
+	double *errorArray = (double *) malloc(arrayBytes);
+	double *errorArrayDevice;
+	err = cudaMalloc((void **)&errorArrayDevice, arrayBytes);
+	if (err != cudaSuccess){
+		fprintf(stderr, "GPUassert: %s\n",err);
+		return err;
+	}
+
+	// For writing error sum reduction, without modifying the original one 
+	// (avoid race condition between blocks)
+	double *newErrorArrayDevice;
+	err = cudaMalloc((void **)&newErrorArrayDevice, arrayBytes);
+	if (err != cudaSuccess){
+		fprintf(stderr, "GPUassert: %s\n",err);
+		return err;
+	}
+
+	double *srcArray = arrayDevice;
+	double *dstArray = newArrayDevice;
+
+	int iterations = jacobiParams.maxIterations;
+	timestamp t_start;
+	t_start = getTimestamp();
+
+	while(iterations--) {
+		kjacobi<<<dimGr, dimBl, sharedMemorySize * sizeof(double)>>>(srcArray, dstArray, inputRows, inputColumns, jacobiParams, sharedMemorySize, errorArrayDevice);
+
+		err = cudaMemcpy(errorArray, errorArrayDevice, arrayBytes, cudaMemcpyDeviceToHost);
+		if (err != cudaSuccess){
+			fprintf(stderr, "GPUassert: %s\n",err);
+			return err;
+		}
+
+		if (jacobiParams.checkConvergence) {
+			double *srcErrorArray = errorArrayDevice;
+			double *dstErrorArray = newErrorArrayDevice;
+			int errorElements = elements;
+
+			while (errorElements > 1) {
+				int errorBlocks = ceil((double) errorElements / BLOCK_SIZE);
+				
+				dim3 dimBlSum(BLOCK_SIZE);
+				dim3 dimGrSum(errorBlocks);
+				ksum<<<dimGrSum, dimBlSum, BLOCK_SIZE * sizeof(double)>>>(srcErrorArray, dstErrorArray);
+				
+				err = cudaDeviceSynchronize();
+				if (err != cudaSuccess){
+					fprintf(stderr, "GPUassert: %s\n",err);
+					return err;
+				}
+
+				errorElements = errorBlocks;
+				if (errorElements > 1) {
+					swap(&srcErrorArray, &dstErrorArray);
+				}
+			}
+
+			err = cudaMemcpy(errorArray, dstErrorArray, sizeof(double), cudaMemcpyDeviceToHost);
+			if (err != cudaSuccess){
+				fprintf(stderr, "GPUassert: %s\n",err);
+				return err;
+			}
+
+			finalError = sqrt(errorArray[0])/(inputColumns * inputRows);
+			if (finalError <= jacobiParams.tol) {
+				break;
+			}
+		}
+
+		if (iterations) {
+			swap(&srcArray, &dstArray);
+		}
+	}
+
+	float msecs = getElapsedtime(t_start);
+
+	err = cudaMemcpy(array, dstArray, arrayBytes, cudaMemcpyDeviceToHost);
+	if (err != cudaSuccess){
+		fprintf(stderr, "GPUassert: %s\n",err);
+		return err;
+	}
+
+	cudaFree(arrayDevice);
+	cudaFree(newArrayDevice);
+	cudaFree(errorArrayDevice);
+	cudaFree(newErrorArrayDevice);
+	free(errorArray);
+
+	printf("Error is %g\n", finalError);
+
+	return msecs;
+}
 
 __global__ void kjacobi(double *array, double *newArray, int inputRows, int inputColumns, const JacobiParams jacobiParams, const int sharedMemorySize, double *errorArray) {
 	const unsigned int column = blockIdx.x * blockDim.x + threadIdx.x;
@@ -73,7 +206,6 @@ __global__ void ksum(double *array, double *newArray) {
 	const unsigned int iShared = threadIdx.x;
 	extern __shared__ double sharedArray[];
 	sharedArray[iShared] = array[i];
-	//printf("error[%d] %.15f\n",  i, array[i]);
 	__syncthreads();
 
 	int threads = ROUND_UP(blockDim.x, 2);
@@ -81,7 +213,6 @@ __global__ void ksum(double *array, double *newArray) {
 		if (threadIdx.x < threads) {
 			int first = iShared * 2;
 			sharedArray[iShared] = sharedArray[first] + sharedArray[first + 1];
-			//printf("Block %d thread %d sum %.15f + %.15f\n", blockIdx.x, threadIdx.x, sharedArray[first], sharedArray[first+1]);
 		}		
 		__syncthreads();
 		threads /= 2;
@@ -89,169 +220,7 @@ __global__ void ksum(double *array, double *newArray) {
 	
 	if (!threadIdx.x) {
 		newArray[blockIdx.x] = sharedArray[iShared];
-		//printf("Block %d %.15f\n", blockIdx.x, newArray[i]);
 	}
-}
-
-extern "C" float jacobiGPU(double *array, int elements, int inputRows, int inputColumns, JacobiParams jacobiParams) {
-	double *arrayDevice;
-	double finalError;
-	cudaError_t err;
-	int arrayBytes = elements * sizeof(double);
-
-	int rowsOfBlocks, columnsOfBlocks, rowsOfBlockThreads, columnsOfBlockThreads;
-	divide2D(BLOCK_SIZE, &rowsOfBlockThreads, &columnsOfBlockThreads);
-	rowsOfBlocks = ceil((float) inputRows / rowsOfBlockThreads);
-	columnsOfBlocks = ceil((float) inputColumns / columnsOfBlockThreads);
-
-	int sharedMemorySize = (rowsOfBlockThreads + 2) * (columnsOfBlockThreads + 2);
-	
-	dim3 dimBl(columnsOfBlockThreads, rowsOfBlockThreads);
-	dim3 dimGr(columnsOfBlocks, rowsOfBlocks);
-
-	printf("Elements %d\nGrid %d X %d\nBlock threads %d X %d\n", elements, rowsOfBlocks, columnsOfBlocks, rowsOfBlockThreads, columnsOfBlockThreads);
-
-	err = cudaMalloc((void **)&arrayDevice, arrayBytes);
-	if (err != cudaSuccess){
-		fprintf(stderr, "GPUassert: %s\n",err);
-		return err;
-	}
-
-	// Copy data to device memory
-	err = cudaMemcpy(arrayDevice, array, arrayBytes, cudaMemcpyHostToDevice);
-	if (err != cudaSuccess){
-		fprintf(stderr, "GPUassert: %s\n",err);
-		return err;
-	}
-
-	double *newArrayDevice;
-
-	err = cudaMalloc((void **)&newArrayDevice, arrayBytes);
-	if (err != cudaSuccess){
-		fprintf(stderr, "GPUassert: %s\n",err);
-		return err;
-	}
-
-	// Copy data to device memory
-	err = cudaMemcpy(newArrayDevice, array, arrayBytes, cudaMemcpyHostToDevice);
-	if (err != cudaSuccess){
-		fprintf(stderr, "GPUassert: %s\n",err);
-		return err;
-	}
-
-	double *errorArray = (double *) malloc(arrayBytes);
-	double *errorArrayDevice;
-	err = cudaMalloc((void **)&errorArrayDevice, arrayBytes);
-	if (err != cudaSuccess){
-		fprintf(stderr, "GPUassert: %s\n",err);
-		return err;
-	}
-
-	double *newErrorArrayDevice;
-	err = cudaMalloc((void **)&newErrorArrayDevice, arrayBytes);
-	if (err != cudaSuccess){
-		fprintf(stderr, "GPUassert: %s\n",err);
-		return err;
-	}
-
-	double *srcArray = arrayDevice;
-	double *dstArray = newArrayDevice;
-
-	int iterations = jacobiParams.maxIterations;
-	timestamp t_start;
-	t_start = getTimestamp();
-
-	while(iterations--) {
-		kjacobi<<<dimGr, dimBl, sharedMemorySize * sizeof(double)>>>(srcArray, dstArray, inputRows, inputColumns, jacobiParams, sharedMemorySize, errorArrayDevice);
-		err = cudaGetLastError();
-		if (err != cudaSuccess){
-			fprintf(stderr, "GPUassert: %s\n",err);
-			return err;
-		}
-	
-		err = cudaDeviceSynchronize();
-		if (err != cudaSuccess){
-			fprintf(stderr, "GPUassert: %s\n",err);
-			return err;
-		}
-
-		err = cudaMemcpy(errorArray, errorArrayDevice, arrayBytes, cudaMemcpyDeviceToHost);
-		if (err != cudaSuccess){
-			fprintf(stderr, "GPUassert: %s\n",err);
-			return err;
-		}
-		
-		for (int i = 0 ; i < elements ; i++) {
-			;//printf("CPU error[%d]: %.15f\n", i, errorArray[i]);
-		}
-
-		if (jacobiParams.checkConvergence) {
-			double *srcErrorArray = errorArrayDevice;
-			double *dstErrorArray = newErrorArrayDevice;
-			int errorElements = elements;
-
-			while (errorElements > 1) {
-				int errorBlocks = ceil((double) errorElements / BLOCK_SIZE);
-				//printf("blocks %d elements %d \n", errorBlocks, errorElements);
-				
-				dim3 dimBlSum(BLOCK_SIZE);
-				dim3 dimGrSum(errorBlocks);
-				ksum<<<dimGrSum, dimBlSum, BLOCK_SIZE * sizeof(double)>>>(srcErrorArray, dstErrorArray);
-				
-				err =cudaGetLastError();
-				if (err != cudaSuccess){
-						fprintf(stderr, "GPUassert: %s\n",err);
-						return err;
-				}
-				err = cudaDeviceSynchronize();
-				if (err != cudaSuccess){
-					fprintf(stderr, "GPUassert: %s\n",err);
-					return err;
-				}
-
-				errorElements = errorBlocks;
-				//return 0; ///////
-
-				if (errorElements > 1) {
-					double *tmp = srcErrorArray;
-					srcErrorArray = dstErrorArray;
-					dstErrorArray = tmp;
-				}
-			}
-
-			err = cudaMemcpy(errorArray, dstErrorArray, sizeof(double), cudaMemcpyDeviceToHost);
-			if (err != cudaSuccess){
-				fprintf(stderr, "GPUassert: %s\n",err);
-				return err;
-			}
-
-			finalError = sqrt(errorArray[0])/(inputColumns * inputRows);
-			if (finalError <= jacobiParams.tol) {
-				break;
-			}
-		}
-
-		if (iterations) {
-			double *tmp = srcArray;
-			srcArray = dstArray;
-			dstArray = tmp;
-		}
-	}
-
-	float msecs = getElapsedtime(t_start);
-	
-
-	err = cudaMemcpy(array, dstArray, arrayBytes, cudaMemcpyDeviceToHost);
-	if (err != cudaSuccess){
-		fprintf(stderr, "GPUassert: %s\n",err);
-		return err;
-	}
-
-	cudaFree(arrayDevice);
-
-	printf("Error is %g\n", finalError);
-
-	return msecs;
 }
 
 __device__ __attribute__((always_inline)) inline void calculateOneElement(const int y, const int x, 
@@ -278,7 +247,6 @@ __device__ __attribute__((always_inline)) inline void calculateOneElement(const 
 	
 	*array = curVal - jacobiParams.relax*updateVal;
 	*errorArray = updateVal*updateVal;
-	//printf("%f\n", *errorArray);
 }
 
 __device__ Neighbors constructNeighbors(int i, int columns) {

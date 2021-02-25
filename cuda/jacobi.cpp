@@ -13,10 +13,6 @@ int main(int argc, char **argv) {
 	int inputColumns = jacobiParams.inputColumns;
 	int elements = inputRows * inputColumns;
 
-	size_t freeCUDAMem, totalCUDAMem;
-	cudaMemGetInfo(&freeCUDAMem, &totalCUDAMem);
-	printf("Total GPU memory %zu, free %zu\n", totalCUDAMem, freeCUDAMem);
-
 	double *array = (double *) malloc(elements * sizeof(double));
 	if (array == NULL) {
 		fprintf(stderr, "CPU array allocation error\n");
@@ -25,13 +21,14 @@ int main(int argc, char **argv) {
 
 	initArray(array, elements);
 	float msecs = jacobiGPU(array, elements, inputRows, inputColumns, jacobiParams);
-
     printf("Execution time %.2f msecs\n", msecs);
+
+	// Print final array
 
 	/*for (int i = 0 ; i < inputRows ; i++) {
 		printf("Line %d\n", i);
 		for (int j = 0 ; j < inputColumns ; j++) {
-			printf("%.25f j %d\n", array[i*inputColumns + j], j);
+			printf("%.25f ", array[i*inputColumns + j]);
 		}
 		printf("\n");
 	}*/
