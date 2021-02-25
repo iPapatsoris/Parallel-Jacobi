@@ -23,15 +23,5 @@ int main(int argc, char **argv) {
 	float msecs = jacobiGPU(array, elements, inputRows, inputColumns, jacobiParams);
     printf("Execution time %.2f msecs\n", msecs);
 
-	// Print final array
-
-	/*for (int i = 0 ; i < inputRows ; i++) {
-		printf("Line %d\n", i);
-		for (int j = 0 ; j < inputColumns ; j++) {
-			printf("%.25f ", array[i*inputColumns + j]);
-		}
-		printf("\n");
-	}*/
-
 	free(array);
 }

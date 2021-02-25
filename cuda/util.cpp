@@ -29,3 +29,20 @@ void swap(double **a, double **b) {
 	*a = *b;
 	*b = tmp;
 }
+
+JacobiConstants getJacobiConstants(int xLeft, int xRight, int yBottom, int yTop, int inputRows, int inputColumns, double alpha) {
+	JacobiConstants jacobiConstants;
+	const double deltaX = (double) (xRight - xLeft) / (inputColumns - 1);
+	const double deltaY = (double) (yTop - yBottom) / (inputRows - 1);
+	const double cx = 1.0/(deltaX*deltaX);
+	const double cy = 1.0/(deltaY*deltaY);
+	const double cc = -2.0*cx-2.0*cy-alpha;
+
+	jacobiConstants.deltaX = deltaX;
+	jacobiConstants.deltaY = deltaY;
+	jacobiConstants.cc = cc;
+	jacobiConstants.cy = cy;
+	jacobiConstants.cx = cx;
+	
+	return jacobiConstants;
+}
